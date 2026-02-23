@@ -1,11 +1,11 @@
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { useIngestChatMessage, useMessages } from "@/hooks/use-messages";
+import { useIngestChatMessage, useMessages, useDeleteMessage, useDeleteAllMessages } from "@/hooks/use-messages";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { User } from "lucide-react";
+import { User, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,8 @@ import { useState } from "react";
 export default function Messages() {
   const { data: messages, isLoading, dataUpdatedAt, refetch } = useMessages();
   const ingestChat = useIngestChatMessage();
+  const deleteMessage = useDeleteMessage();
+  const deleteAllMessages = useDeleteAllMessages();
   const [form, setForm] = useState({
     channel: 'whatsapp' as 'whatsapp' | 'telegram' | 'other',
     senderRole: 'customer' as 'customer' | 'admin',
@@ -131,7 +133,17 @@ export default function Messages() {
 
         <Card className="shadow-sm border-border/50">
           <CardHeader>
-            <CardTitle>Incoming Stream</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Incoming Stream</CardTitle>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => deleteAllMessages.mutate()}
+                disabled={deleteAllMessages.isPending || !messages?.length}
+              >
+                {deleteAllMessages.isPending ? 'Clearing...' : 'Clear All'}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -155,6 +167,7 @@ export default function Messages() {
                     <TableHead>Confidence</TableHead>
                     <TableHead>Order Created</TableHead>
                     <TableHead>Received At</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -204,6 +217,18 @@ export default function Messages() {
                         </TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {msg.createdAt ? format(new Date(msg.createdAt), 'MMM d, HH:mm') : '-'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => deleteMessage.mutate(msg.id)}
+                            disabled={deleteMessage.isPending}
+                            title="Delete message"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );

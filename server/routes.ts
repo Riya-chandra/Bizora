@@ -1,8 +1,21 @@
-import type { Express } from "express";
+import type { Express, Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
+
+const liveMessageClients = new Set<Response>();
+
+function broadcastLiveMessageEvent(eventName: string, payload: unknown) {
+  const event = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const client of Array.from(liveMessageClients)) {
+    if (client.writableEnded) {
+      liveMessageClients.delete(client);
+      continue;
+    }
+    client.write(event);
+  }
+}
 
 type ParsedItem = { name: string; quantity: number; price: number };
 
@@ -10,30 +23,17 @@ function normalizeProductName(name: string): string {
   return name.toLowerCase().replace(/[^a-z\s-]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function buildDynamicPriceMap(existingOrders: Array<{ items: unknown }>): Map<string, number> {
+function buildDynamicPriceMap(
+  existingOrders: Array<{ items: unknown }>,
+  savedPrices: Array<{ normalizedName: string; unitPrice: number }>,
+): Map<string, number> {
   const dynamicPriceMap = new Map<string, number>();
 
-  // Fallback catalog for common fashion items (in cents)
-  const fallbackCatalog: Record<string, number> = {
-    saree: 150000,
-    sari: 150000,
-    kurti: 90000,
-    kurtis: 90000,
-    shirt: 70000,
-    shirts: 70000,
-    tshirt: 50000,
-    "t-shirt": 50000,
-    suit: 220000,
-    lehenga: 350000,
-    dupatta: 40000,
-  };
+  for (const savedPrice of savedPrices) {
+    if (!savedPrice.normalizedName || savedPrice.unitPrice <= 0) continue;
+    dynamicPriceMap.set(savedPrice.normalizedName, savedPrice.unitPrice);
+  }
 
-  // Add fallback prices first
-  Object.entries(fallbackCatalog).forEach(([name, price]) => {
-    dynamicPriceMap.set(name, price);
-  });
-
-  // Override with prices from existing orders
   for (const order of existingOrders) {
     if (!Array.isArray(order.items)) continue;
     for (const rawItem of order.items) {
@@ -47,6 +47,40 @@ function buildDynamicPriceMap(existingOrders: Array<{ items: unknown }>): Map<st
   }
 
   return dynamicPriceMap;
+}
+
+function extractPriceUpdates(message: string): Array<{ productName: string; unitPrice: number }> {
+  const updatesByProduct = new Map<string, number>();
+
+  const pricePatterns = [
+    /(\d+)\s+([a-zA-Z\s-]{2,50}?)\s+(\d+)\s*(?:each|per|rs|inr|₹)?/gi,
+    /(?:set|update|change)?\s*([a-zA-Z][a-zA-Z\s-]{1,40}?)\s*(?:price)?\s*(?:to|is|=|@|:|for)?\s*(?:₹|rs\.?|inr)?\s*(\d{2,7})\b/gi,
+  ];
+
+  for (const pattern of pricePatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(message)) !== null) {
+      let productName = '';
+      let unitPriceInCents = 0;
+
+      if (match.length >= 4 && /^\d+$/.test(match[1])) {
+        productName = match[2]?.trim() || '';
+        unitPriceInCents = Number.parseInt(match[3], 10) * 100;
+      } else {
+        productName = match[1]?.trim() || '';
+        unitPriceInCents = Number.parseInt(match[2], 10) * 100;
+      }
+
+      const normalizedName = normalizeProductName(productName);
+      if (!normalizedName || unitPriceInCents <= 0) continue;
+      updatesByProduct.set(normalizedName, unitPriceInCents);
+    }
+  }
+
+  return Array.from(updatesByProduct.entries()).map(([productName, unitPrice]) => ({
+    productName,
+    unitPrice,
+  }));
 }
 
 function resolveDynamicPrice(productName: string, dynamicPriceMap: Map<string, number>): number | undefined {
@@ -137,7 +171,23 @@ async function processIncomingMessage(input: {
   senderRole: 'customer' | 'admin';
 }) {
   const existingOrders = await storage.getOrders();
-  const dynamicPriceMap = buildDynamicPriceMap(existingOrders);
+  const savedPrices = await storage.getProductPrices(input.businessAccount);
+  const dynamicPriceMap = buildDynamicPriceMap(existingOrders, savedPrices);
+
+  if (input.senderRole === 'admin') {
+    const priceUpdates = extractPriceUpdates(input.message);
+    for (const update of priceUpdates) {
+      await storage.upsertProductPrice({
+        businessAccount: input.businessAccount,
+        productName: update.productName,
+        normalizedName: normalizeProductName(update.productName),
+        unitPrice: update.unitPrice,
+      });
+      dynamicPriceMap.set(update.productName, update.unitPrice);
+      console.log(`[Pricing] Updated ${update.productName} => ₹${update.unitPrice / 100}`);
+    }
+  }
+
   const parsed = parseChatOrderMessage(input.message, dynamicPriceMap);
 
   let customer = await storage.getCustomerByPhone(input.from);
@@ -178,6 +228,17 @@ async function processIncomingMessage(input: {
     isOrderCreated: orderCreated,
   });
 
+  broadcastLiveMessageEvent('message.ingested', {
+    channel: input.channel,
+    businessAccount: input.businessAccount,
+    senderRole: input.senderRole,
+    from: input.from,
+    orderCreated,
+    itemsDetected: parsed.items.length,
+    confidenceScore: parsed.confidenceScore,
+    createdAt: Date.now(),
+  });
+
   return {
     success: true,
     orderCreated,
@@ -190,6 +251,28 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  app.get('/api/messages/stream', (_req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    liveMessageClients.add(res);
+    res.write(`event: connected\ndata: ${JSON.stringify({ connected: true })}\n\n`);
+
+    const keepAlive = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(': keep-alive\n\n');
+      }
+    }, 25000);
+
+    res.on('close', () => {
+      clearInterval(keepAlive);
+      liveMessageClients.delete(res);
+      res.end();
+    });
+  });
 
   app.post(api.webhook.receive.path, async (req, res) => {
     try {
@@ -295,6 +378,28 @@ export async function registerRoutes(
   app.get(api.messages.list.path, async (req, res) => {
     const messages = await storage.getMessages();
     res.json(messages);
+  });
+
+  app.delete(api.messages.delete.path, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const success = await storage.deleteMessage(id);
+      if (!success) {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete message" });
+    }
+  });
+
+  app.delete(api.messages.deleteAll.path, async (req, res) => {
+    try {
+      const deleted = await storage.deleteAllMessages();
+      res.json({ success: true, deleted });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete messages" });
+    }
   });
 
   app.get(api.invoices.list.path, async (req, res) => {

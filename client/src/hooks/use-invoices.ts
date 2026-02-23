@@ -9,5 +9,9 @@ export function useInvoices() {
       if (!res.ok) throw new Error("Failed to fetch invoices");
       return api.invoices.list.responses[200].parse(await res.json());
     },
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }

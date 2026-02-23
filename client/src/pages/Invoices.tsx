@@ -6,18 +6,69 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AmountDisplay } from "@/components/AmountDisplay";
 import { StatusBadge } from "@/components/StatusBadge";
 import { format } from "date-fns";
-import { FileText } from "lucide-react";
+import { ChevronDown, ChevronUp, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Fragment, useState } from "react";
+import type { Invoice } from "@shared/schema";
 
 export default function Invoices() {
-  const { data: invoices, isLoading } = useInvoices();
+  const { data: invoices, isLoading, isError, error, refetch, isFetching } = useInvoices();
+  const [openInvoiceId, setOpenInvoiceId] = useState<number | null>(null);
+
+  const toggleInvoiceRow = (invoiceId: number) => {
+    setOpenInvoiceId((current) => (current === invoiceId ? null : invoiceId));
+  };
+
+  const downloadInvoice = (invoice: Invoice) => {
+    const issuedAt = invoice.createdAt ? format(new Date(invoice.createdAt), 'PPP p') : '-';
+    const subtotal = invoice.totalAmount - invoice.gstAmount;
+
+    const content = [
+      '==========================================',
+      '              INVOICE',
+      '==========================================',
+      '',
+      `Invoice Number: ${invoice.invoiceNumber}`,
+      `Order Reference: #${invoice.orderId}`,
+      `Issued: ${issuedAt}`,
+      `Status: ${invoice.status.toUpperCase()}`,
+      '',
+      '==========================================',
+      '              BILLING DETAILS',
+      '==========================================',
+      '',
+      `Subtotal:        ₹${(subtotal / 100).toFixed(2)}`,
+      `GST (18%):       ₹${(invoice.gstAmount / 100).toFixed(2)}`,
+      '',
+      `Total Amount:    ₹${(invoice.totalAmount / 100).toFixed(2)}`,
+      '',
+      '==========================================',
+      '',
+      'Thank you for your business!',
+    ].join('\n');
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${invoice.invoiceNumber}.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
-          <p className="text-muted-foreground mt-1">Generated invoices and billing status.</p>
+          <div className="mt-1 flex items-center gap-3 text-muted-foreground">
+            <p>Generated invoices and billing status.</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              Refresh
+            </Button>
+          </div>
         </div>
 
         <Card className="shadow-sm border-border/50">
@@ -28,6 +79,10 @@ export default function Invoices() {
             {isLoading ? (
               <div className="space-y-2">
                 {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+              </div>
+            ) : isError ? (
+              <div className="text-center py-12 text-destructive">
+                {error instanceof Error ? error.message : 'Failed to load invoices'}
               </div>
             ) : invoices?.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
@@ -43,33 +98,93 @@ export default function Invoices() {
                     <TableHead>GST Amount</TableHead>
                     <TableHead>Total Amount</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Download</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {invoices?.map((invoice) => (
-                    <TableRow key={invoice.id}>
-                      <TableCell className="font-mono font-medium">{invoice.invoiceNumber}</TableCell>
-                      <TableCell className="text-muted-foreground">#{invoice.orderId}</TableCell>
-                      <TableCell>
-                        {invoice.createdAt ? format(new Date(invoice.createdAt), 'MMM d, yyyy') : '-'}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        <AmountDisplay amountInCents={invoice.gstAmount} />
-                      </TableCell>
-                      <TableCell className="font-bold">
-                        <AmountDisplay amountInCents={invoice.totalAmount} />
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={invoice.status} variant="outline" />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                          <FileText className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {invoices?.map((invoice) => {
+                    const isOpen = openInvoiceId === invoice.id;
+                    const subtotal = invoice.totalAmount - invoice.gstAmount;
+
+                    return (
+                      <Fragment key={invoice.id}>
+                        <TableRow>
+                          <TableCell className="font-mono font-medium">{invoice.invoiceNumber}</TableCell>
+                          <TableCell className="text-muted-foreground">#{invoice.orderId}</TableCell>
+                          <TableCell>
+                            {invoice.createdAt ? format(new Date(invoice.createdAt), 'MMM d, yyyy') : '-'}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            <AmountDisplay amountInCents={invoice.gstAmount} />
+                          </TableCell>
+                          <TableCell className="font-bold">
+                            <AmountDisplay amountInCents={invoice.totalAmount} />
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={invoice.status} variant="outline" />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => downloadInvoice(invoice)}
+                                aria-label={`Download ${invoice.invoiceNumber}`}
+                                title="Download Invoice"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => toggleInvoiceRow(invoice.id)}
+                                aria-label={`${isOpen ? 'Close' : 'Open'} ${invoice.invoiceNumber}`}
+                                title={isOpen ? 'Close Details' : 'Open Details'}
+                              >
+                                {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {isOpen ? (
+                          <TableRow key={`details-${invoice.id}`}>
+                            <TableCell colSpan={7}>
+                              <div className="rounded-md border bg-secondary/30 p-4 text-sm">
+                                <div className="grid gap-2 md:grid-cols-2">
+                                  <div>
+                                    <p className="text-muted-foreground">Invoice</p>
+                                    <p className="font-medium">{invoice.invoiceNumber}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-muted-foreground">Order Reference</p>
+                                    <p className="font-medium">#{invoice.orderId}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-muted-foreground">Subtotal</p>
+                                    <p className="font-medium"><AmountDisplay amountInCents={subtotal} /></p>
+                                  </div>
+                                  <div>
+                                    <p className="text-muted-foreground">GST</p>
+                                    <p className="font-medium"><AmountDisplay amountInCents={invoice.gstAmount} /></p>
+                                  </div>
+                                  <div>
+                                    <p className="text-muted-foreground">Total</p>
+                                    <p className="font-bold"><AmountDisplay amountInCents={invoice.totalAmount} /></p>
+                                  </div>
+                                  <div>
+                                    <p className="text-muted-foreground">Status</p>
+                                    <div className="mt-1"><StatusBadge status={invoice.status} variant="outline" /></div>
+                                  </div>
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

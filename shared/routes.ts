@@ -84,6 +84,21 @@ export const api = {
         200: z.array(z.custom<typeof messages.$inferSelect>()),
       },
     },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/messages/:id' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        404: errorSchemas.notFound,
+      },
+    },
+    deleteAll: {
+      method: 'DELETE' as const,
+      path: '/api/messages' as const,
+      responses: {
+        200: z.object({ success: z.boolean(), deleted: z.number() }),
+      },
+    },
   },
   customers: {
     list: {

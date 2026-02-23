@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useLiveMessageEvents } from "@/hooks/use-messages";
 
 const NAV_ITEMS = [
   { label: "Overview", icon: LayoutDashboard, href: "/" },
@@ -23,12 +24,13 @@ const NAV_ITEMS = [
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  useLiveMessageEvents();
 
   return (
     <div className="min-h-screen bg-background flex flex-col md:flex-row">
       {/* Mobile Header */}
       <div className="md:hidden flex items-center justify-between p-4 border-b bg-card z-20 sticky top-0">
-        <div className="font-display font-bold text-xl text-primary">AutoBusiness</div>
+        <div className="font-display font-bold text-xl text-primary">Bizora</div>
         <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </Button>
@@ -42,9 +44,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <div className="h-full flex flex-col p-6">
           <div className="hidden md:flex items-center gap-3 mb-10 px-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-white font-bold">
-              A
+              B
             </div>
-            <span className="font-display font-bold text-xl tracking-tight">AutoBusiness</span>
+            <span className="font-display font-bold text-xl tracking-tight">Bizora</span>
           </div>
 
           <nav className="space-y-1 flex-1">

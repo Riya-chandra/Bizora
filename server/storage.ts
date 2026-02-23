@@ -1,10 +1,11 @@
 import { db } from "./db";
 import {
-  customers, messages, orders, invoices,
+  customers, messages, orders, invoices, productPrices,
   type Customer, type InsertCustomer,
   type Message, type InsertMessage,
   type Order, type InsertOrder,
-  type Invoice, type InsertInvoice
+  type Invoice, type InsertInvoice,
+  type ProductPrice, type InsertProductPrice
 } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -15,6 +16,8 @@ export interface IStorage {
 
   getMessages(): Promise<Message[]>;
   createMessage(msg: InsertMessage): Promise<Message>;
+  deleteMessage(id: number): Promise<boolean>;
+  deleteAllMessages(): Promise<number>;
 
   getOrders(): Promise<Order[]>;
   createOrder(order: InsertOrder): Promise<Order>;
@@ -22,6 +25,9 @@ export interface IStorage {
 
   getInvoices(): Promise<Invoice[]>;
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+
+  getProductPrices(businessAccount: string): Promise<ProductPrice[]>;
+  upsertProductPrice(price: InsertProductPrice): Promise<ProductPrice>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -44,6 +50,14 @@ export class DatabaseStorage implements IStorage {
     const [m] = await db.insert(messages).values(msg).returning();
     return m;
   }
+  async deleteMessage(id: number): Promise<boolean> {
+    const result = await db.delete(messages).where(eq(messages.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+  async deleteAllMessages(): Promise<number> {
+    const result = await db.delete(messages);
+    return result.rowCount ?? 0;
+  }
 
   async getOrders(): Promise<Order[]> {
     return await db.select().from(orders).orderBy(desc(orders.createdAt));
@@ -63,6 +77,30 @@ export class DatabaseStorage implements IStorage {
   async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
     const [i] = await db.insert(invoices).values(invoice).returning();
     return i;
+  }
+
+  async getProductPrices(businessAccount: string): Promise<ProductPrice[]> {
+    return await db
+      .select()
+      .from(productPrices)
+      .where(eq(productPrices.businessAccount, businessAccount))
+      .orderBy(desc(productPrices.updatedAt));
+  }
+
+  async upsertProductPrice(price: InsertProductPrice): Promise<ProductPrice> {
+    const [row] = await db
+      .insert(productPrices)
+      .values(price)
+      .onConflictDoUpdate({
+        target: [productPrices.businessAccount, productPrices.normalizedName],
+        set: {
+          productName: price.productName,
+          unitPrice: price.unitPrice,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
   }
 }
 
