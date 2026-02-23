@@ -7,7 +7,7 @@ import {
   type Invoice, type InsertInvoice,
   type ProductPrice, type InsertProductPrice
 } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getCustomers(): Promise<Customer[]>;
@@ -18,6 +18,7 @@ export interface IStorage {
   createMessage(msg: InsertMessage): Promise<Message>;
   deleteMessage(id: number): Promise<boolean>;
   deleteAllMessages(): Promise<number>;
+  deleteMessageWithRelated(id: number): Promise<{ messagesDeleted: number; ordersDeleted: number; invoicesDeleted: number }>;
 
   getOrders(): Promise<Order[]>;
   createOrder(order: InsertOrder): Promise<Order>;
@@ -57,6 +58,48 @@ export class DatabaseStorage implements IStorage {
   async deleteAllMessages(): Promise<number> {
     const result = await db.delete(messages);
     return result.rowCount ?? 0;
+  }
+  async deleteMessageWithRelated(id: number): Promise<{ messagesDeleted: number; ordersDeleted: number; invoicesDeleted: number }> {
+    // Get orders related to this message
+    const msg = await db.select().from(messages).where(eq(messages.id, id));
+    if (!msg[0]) return { messagesDeleted: 0, ordersDeleted: 0, invoicesDeleted: 0 };
+
+    // Find orders created around the same time from same customer
+    const msgTime = msg[0].createdAt;
+    const relatedOrders = await db
+      .select()
+      .from(orders)
+      .innerJoin(customers, eq(orders.customerId, customers.id))
+      .where(eq(customers.phoneNumber, (msg[0].parsedData as any)?.fromNumber || ''))
+      .then((rows) => rows.filter((r) => {
+        const timeDiff = Math.abs((r.orders.createdAt?.getTime() || 0) - (msgTime?.getTime() || 0));
+        return timeDiff < 60000; // Within 60 seconds
+      }));
+
+    const orderIds = relatedOrders.map((r) => r.orders.id);
+
+    let invoicesDeleted = 0;
+    let ordersDeleted = 0;
+
+    // Delete invoices for these orders
+    if (orderIds.length > 0) {
+      const invResult = await db
+        .delete(invoices)
+        .where(inArray(invoices.orderId, orderIds));
+      invoicesDeleted = (invResult.rowCount ?? 0);
+
+      // Delete the orders
+      const ordResult = await db
+        .delete(orders)
+        .where(inArray(orders.id, orderIds));
+      ordersDeleted = (ordResult.rowCount ?? 0);
+    }
+
+    // Delete the message
+    const msgResult = await db.delete(messages).where(eq(messages.id, id));
+    const messagesDeleted = (msgResult.rowCount ?? 0);
+
+    return { messagesDeleted, ordersDeleted, invoicesDeleted };
   }
 
   async getOrders(): Promise<Order[]> {

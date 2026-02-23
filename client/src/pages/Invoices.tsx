@@ -20,42 +20,8 @@ export default function Invoices() {
   };
 
   const downloadInvoice = (invoice: Invoice) => {
-    const issuedAt = invoice.createdAt ? format(new Date(invoice.createdAt), 'PPP p') : '-';
-    const subtotal = invoice.totalAmount - invoice.gstAmount;
-
-    const content = [
-      '==========================================',
-      '              INVOICE',
-      '==========================================',
-      '',
-      `Invoice Number: ${invoice.invoiceNumber}`,
-      `Order Reference: #${invoice.orderId}`,
-      `Issued: ${issuedAt}`,
-      `Status: ${invoice.status.toUpperCase()}`,
-      '',
-      '==========================================',
-      '              BILLING DETAILS',
-      '==========================================',
-      '',
-      `Subtotal:        ₹${(subtotal / 100).toFixed(2)}`,
-      `GST (18%):       ₹${(invoice.gstAmount / 100).toFixed(2)}`,
-      '',
-      `Total Amount:    ₹${(invoice.totalAmount / 100).toFixed(2)}`,
-      '',
-      '==========================================',
-      '',
-      'Thank you for your business!',
-    ].join('\n');
-
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${invoice.invoiceNumber}.txt`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    // Open PDF invoice in new window for printing/saving
+    window.open(`/api/invoices/${invoice.id}/pdf`, '_blank');
   };
 
   return (

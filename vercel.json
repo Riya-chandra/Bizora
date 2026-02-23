@@ -1,0 +1,11 @@
+{
+  "buildCommand": "npm run build",
+  "startCommand": "npm start",
+  "outputDirectory": "dist/public",
+  "cleanUrls": true,
+  "env": {
+    "DATABASE_URL": "@database_url",
+    "NODE_ENV": "production",
+    "AI_PARSER_MODE": "free"
+  }
+}

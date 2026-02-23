@@ -1,7 +1,10 @@
 import type { Express, Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+import Fuse from 'fuse.js';
 import { api } from "@shared/routes";
+import { parseOrderMessageWithAI } from "./ai-parser";
+import { generateInvoiceHTML } from "./invoice-pdf";
 import { z } from "zod";
 
 const liveMessageClients = new Set<Response>();
@@ -51,30 +54,26 @@ function buildDynamicPriceMap(
 
 function extractPriceUpdates(message: string): Array<{ productName: string; unitPrice: number }> {
   const updatesByProduct = new Map<string, number>();
+  const segments = message.split(/\s+and\s+/i);
 
-  const pricePatterns = [
-    /(\d+)\s+([a-zA-Z\s-]{2,50}?)\s+(\d+)\s*(?:each|per|rs|inr|₹)?/gi,
-    /(?:set|update|change)?\s*([a-zA-Z][a-zA-Z\s-]{1,40}?)\s*(?:price)?\s*(?:to|is|=|@|:|for)?\s*(?:₹|rs\.?|inr)?\s*(\d{2,7})\b/gi,
-  ];
+  for (const segment of segments) {
+    const match = segment.match(/([a-zA-Z][a-zA-Z\s-]{1,40}?)\s+(?:price)?\s*(?:to|is|=)?\s*(\d{2,7})\b/i);
+    if (!match) continue;
 
-  for (const pattern of pricePatterns) {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(message)) !== null) {
-      let productName = '';
-      let unitPriceInCents = 0;
+    let productName = (match[1] || '').trim();
+    // Remove leading keywords (update, set, change)
+    productName = productName.replace(/^(update|set|change|modify|edit)\s+/i, '').trim();
+    // Remove trailing keywords
+    productName = productName.replace(/\s+(price|to|is|for)\s*$/i, '').trim();
+    const unitPriceInCents = Number.parseInt(match[2], 10) * 100;
 
-      if (match.length >= 4 && /^\d+$/.test(match[1])) {
-        productName = match[2]?.trim() || '';
-        unitPriceInCents = Number.parseInt(match[3], 10) * 100;
-      } else {
-        productName = match[1]?.trim() || '';
-        unitPriceInCents = Number.parseInt(match[2], 10) * 100;
-      }
+    if (!productName || productName.length < 2 || unitPriceInCents <= 0) continue;
 
-      const normalizedName = normalizeProductName(productName);
-      if (!normalizedName || unitPriceInCents <= 0) continue;
-      updatesByProduct.set(normalizedName, unitPriceInCents);
-    }
+    const normalizedName = normalizeProductName(productName);
+    if (!normalizedName) continue;
+
+    updatesByProduct.set(normalizedName, unitPriceInCents);
+    console.log(`[extractPriceUpdates] "${productName}" => ₹${unitPriceInCents / 100}`);
   }
 
   return Array.from(updatesByProduct.entries()).map(([productName, unitPrice]) => ({
@@ -88,11 +87,25 @@ function resolveDynamicPrice(productName: string, dynamicPriceMap: Map<string, n
   const exact = dynamicPriceMap.get(normalized);
   if (exact) return exact;
 
-  for (const entry of Array.from(dynamicPriceMap.entries())) {
-    const [key, value] = entry;
-    if (normalized.includes(key) || key.includes(normalized)) {
-      return value;
-    }
+  // Fuzzy-match using Fuse.js against keys in dynamicPriceMap
+  const entries = Array.from(dynamicPriceMap.entries()).map(([k, v]) => ({ key: k, price: v }));
+  if (entries.length === 0) return undefined;
+
+  const fuse = new Fuse<{ key: string; price: number }>(entries, {
+    keys: ['key'],
+    threshold: 0.4,
+    ignoreLocation: true,
+  });
+
+  const results = fuse.search(normalized);
+  if (results && results.length > 0) {
+    const best = results[0].item;
+    return best.price;
+  }
+
+  // Last-resort: substring match
+  for (const [key, value] of Array.from(dynamicPriceMap.entries())) {
+    if (normalized.includes(key) || key.includes(normalized)) return value;
   }
   return undefined;
 }
@@ -111,6 +124,7 @@ function parseChatOrderMessage(
   let usedDynamicPrice = false;
 
   // Examples: "2 saree 1200 each", "3 shirt @ 650", "2 kurti 1200"
+  const hindiKeywords = /\b(chahiye|aur|ke|ka|mujhe|mere|mere|ko|plz|please|thank|thanks|send)\b/gi;
   const explicitPricePatterns = [
     /(\d+)\s+([a-zA-Z\s-]{2,50}?)\s+(\d+)\s*(?:each|per|rs|inr)?/gi,
     /(\d+)\s+([a-zA-Z\s-]{2,50}?)\s*@\s*(\d+)/gi,
@@ -120,8 +134,15 @@ function parseChatOrderMessage(
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(message)) !== null) {
       const quantity = Number.parseInt(match[1], 10);
-      const productName = match[2]?.trim();
+      let productName = match[2]?.trim() || '';
       const unitPriceInCents = Number.parseInt(match[3], 10) * 100;
+      
+      // Skip if product name contains Hindi keywords
+      if (hindiKeywords.test(productName)) {
+        console.log(`[Parser] Skipped Hinglish product: "${productName}"`);
+        continue;
+      }
+      
       if (productName && quantity > 0 && unitPriceInCents > 0) {
         pushItem(items, productName, quantity, unitPriceInCents);
         console.log(`[Parser] Explicit: ${quantity}x "${productName}" @ ₹${unitPriceInCents/100}`);
@@ -176,6 +197,7 @@ async function processIncomingMessage(input: {
 
   if (input.senderRole === 'admin') {
     const priceUpdates = extractPriceUpdates(input.message);
+    console.log(`[Admin] Extracted price updates: ${JSON.stringify(priceUpdates)}`);
     for (const update of priceUpdates) {
       await storage.upsertProductPrice({
         businessAccount: input.businessAccount,
@@ -183,12 +205,59 @@ async function processIncomingMessage(input: {
         normalizedName: normalizeProductName(update.productName),
         unitPrice: update.unitPrice,
       });
-      dynamicPriceMap.set(update.productName, update.unitPrice);
-      console.log(`[Pricing] Updated ${update.productName} => ₹${update.unitPrice / 100}`);
+      dynamicPriceMap.set(normalizeProductName(update.productName), update.unitPrice);
+      console.log(`[Pricing] Updated "${update.productName}" (normalized: "${normalizeProductName(update.productName)}") => ₹${update.unitPrice / 100}`);
     }
   }
 
-  const parsed = parseChatOrderMessage(input.message, dynamicPriceMap);
+  let parsed = parseChatOrderMessage(input.message, dynamicPriceMap);
+  console.log(`[Parser] Regex result: ${JSON.stringify(parsed)}`);
+
+  // If low confidence OR message contains Hinglish keywords, ask AI for help
+  const hindiKeywords = /\b(chahiye|mujhe|mere|aur|ke|ka)\b/i;
+  const aiEnabled = Boolean(process.env.AI_PARSER_MODE) && (process.env.AI_PARSER_MODE === 'openai' || process.env.AI_PARSER_MODE === 'free');
+  const hindiMatch = hindiKeywords.test(input.message);
+  const shouldUseAI = aiEnabled && (parsed.confidenceScore <= 0.75 || hindiMatch);
+  
+  console.log(`[AI DEBUG] AI_PARSER_MODE=${process.env.AI_PARSER_MODE}, has API key=${Boolean(process.env.OPENAI_API_KEY)}`);
+  console.log(`[AI DEBUG] aiEnabled=${aiEnabled}, confidenceScore=${parsed.confidenceScore}, hindiMatch=${hindiMatch}, senderRole=${input.senderRole}`);
+  console.log(`[AI DEBUG] shouldUseAI=${shouldUseAI}, will enter block=${shouldUseAI && input.senderRole === 'customer'}`);
+  
+  if (shouldUseAI && input.senderRole === 'customer') {
+    console.log(`[AI Parser] ✓ ENTERING AI PARSER BLOCK (AI_PARSER_MODE=${process.env.AI_PARSER_MODE})`);
+    try {
+      const priceHistory = savedPrices.map(p => ({ product: p.productName, price: Math.round(p.unitPrice / 100) }));
+      console.log(`[AI Parser] Calling with priceHistory: ${JSON.stringify(priceHistory)}`);
+      const aiResult = await parseOrderMessageWithAI(input.message, input.businessAccount, priceHistory);
+      console.log(`[AI Parser] AI result: ${JSON.stringify(aiResult)}`);
+      if (aiResult.items.length > 0 && aiResult.confidence > parsed.confidenceScore) {
+        console.log(`[AI Parser] AI confidence (${aiResult.confidence}) > regex confidence (${parsed.confidenceScore}), using AI items`);
+        // Resolve prices from dynamicPriceMap for AI items
+        const itemsWithPrice: ParsedItem[] = [];
+        for (const it of aiResult.items) {
+          console.log(`[AI Parser] Resolving price for "${it.name}"`);
+          const price = resolveDynamicPrice(it.name, dynamicPriceMap) ?? 0;
+          console.log(`[AI Parser] Resolved "${it.name}" => ₹${price / 100}`);
+          if (price > 0) itemsWithPrice.push({ name: normalizeProductName(it.name), quantity: it.quantity, price });
+        }
+        if (itemsWithPrice.length > 0) {
+          const total = itemsWithPrice.reduce((s, i) => s + i.quantity * i.price, 0);
+          parsed = { items: itemsWithPrice, totalAmount: total, confidenceScore: aiResult.confidence };
+          console.log(`[AI Parser] ✓ USED AI RESULT. Items: ${JSON.stringify(itemsWithPrice)}, Total: ₹${total / 100}`);
+        } else {
+          console.log(`[AI Parser] No AI items had prices in dynamicPriceMap`);
+        }
+      } else {
+        console.log(`[AI Parser] AI confidence (${aiResult.confidence}) not better than regex (${parsed.confidenceScore}), keeping regex result`);
+      }
+    } catch (err) {
+      console.error('[AI Parser] ERROR:', err);
+    }
+  } else if (shouldUseAI) {
+    console.log(`[AI DEBUG] shouldUseAI=true but senderRole not customer (${input.senderRole}), skipping AI`);
+  } else {
+    console.log(`[AI DEBUG] shouldUseAI=false, skipping AI parser`);
+  }
 
   let customer = await storage.getCustomerByPhone(input.from);
   if (!customer) {
@@ -383,11 +452,18 @@ export async function registerRoutes(
   app.delete(api.messages.delete.path, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const success = await storage.deleteMessage(id);
-      if (!success) {
+      const result = await storage.deleteMessageWithRelated(id);
+      if (result.messagesDeleted === 0) {
         return res.status(404).json({ message: "Message not found" });
       }
-      res.json({ success: true });
+      res.json({ 
+        success: true, 
+        deleted: {
+          messages: result.messagesDeleted,
+          orders: result.ordersDeleted,
+          invoices: result.invoicesDeleted
+        }
+      });
     } catch (err) {
       res.status(500).json({ message: "Failed to delete message" });
     }
@@ -395,8 +471,27 @@ export async function registerRoutes(
 
   app.delete(api.messages.deleteAll.path, async (req, res) => {
     try {
-      const deleted = await storage.deleteAllMessages();
-      res.json({ success: true, deleted });
+      // Get all messages first to cascade delete all related data
+      const messages = await storage.getMessages();
+      let totalMessages = 0;
+      let totalOrders = 0;
+      let totalInvoices = 0;
+
+      for (const msg of messages) {
+        const result = await storage.deleteMessageWithRelated(msg.id);
+        totalMessages += result.messagesDeleted;
+        totalOrders += result.ordersDeleted;
+        totalInvoices += result.invoicesDeleted;
+      }
+
+      res.json({ 
+        success: true, 
+        deleted: {
+          messages: totalMessages,
+          orders: totalOrders,
+          invoices: totalInvoices
+        }
+      });
     } catch (err) {
       res.status(500).json({ message: "Failed to delete messages" });
     }
@@ -405,6 +500,37 @@ export async function registerRoutes(
   app.get(api.invoices.list.path, async (req, res) => {
     const invoices = await storage.getInvoices();
     res.json(invoices);
+  });
+
+  // Get invoice as HTML for PDF download
+  app.get('/api/invoices/:id/pdf', async (req, res) => {
+    try {
+      const invoiceId = Number(req.params.id);
+      const invoices = await storage.getInvoices();
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      
+      if (!invoice) {
+        return res.status(404).json({ message: 'Invoice not found' });
+      }
+
+      const orders = await storage.getOrders();
+      const order = orders.find(o => o.id === invoice.orderId);
+      
+      // Parse order items from the order object
+      let orderItems: Array<{ name: string; quantity: number; price: number }> = [];
+      if (order && Array.isArray(order.items)) {
+        orderItems = order.items as any;
+      }
+      
+      const htmlContent = generateInvoiceHTML(invoice, order, orderItems);
+      
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `inline; filename="${invoice.invoiceNumber}.html"`);
+      res.send(htmlContent);
+    } catch (err) {
+      console.error('Error generating PDF:', err);
+      res.status(500).json({ message: 'Failed to generate invoice' });
+    }
   });
 
   // Seed db on startup
