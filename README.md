@@ -47,6 +47,10 @@ Customer sends WhatsApp message → AI parses order → Order created → Invoic
 
 ##  How It Works - Complete Flow
 
+
+https://github.com/user-attachments/assets/56171e73-e561-4118-ba6f-5833896a5ba9
+
+
 ### **1. Message Ingestion** 
 ```
 WhatsApp → Twilio Webhook → /api/ingest-chat → Parser
@@ -477,6 +481,7 @@ Questions? Issues?
 ---
 
 **Made with ❤️ for Indian businesses 🇮🇳**
+
 
 
 
