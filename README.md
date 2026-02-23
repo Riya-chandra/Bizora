@@ -17,31 +17,31 @@ Customer sends WhatsApp message → AI parses order → Order created → Invoic
 ##  Key Features
 
 ###  Order Management
-- ✅ **Intelligent Message Parsing**: Understands Hinglish & Indian English ("mujhe 2 kurti chahiye aur 1 duppatta")
-- ✅ **Auto Order Creation**: Orders auto-created from WhatsApp messages
-- ✅ **Order Tracking**: Track status (Pending, Paid, Draft)
-- ✅ **Cascade Delete**: Delete message → auto-deletes related orders & invoices
+-  **Intelligent Message Parsing**: Understands Hinglish & Indian English ("mujhe 2 kurti chahiye aur 1 duppatta")
+-  **Auto Order Creation**: Orders auto-created from WhatsApp messages
+-  **Order Tracking**: Track status (Pending, Paid, Draft)
+-  **Cascade Delete**: Delete message → auto-deletes related orders & invoices
 
 ###  Invoice & Billing
-- ✅ **Professional HTML Invoices**: Print-to-PDF compatible invoices
-- ✅ **Auto GST Calculation**: 18% GST automatically calculated
-- ✅ **Invoice Status**: Issued, Pending, Paid tracking
-- ✅ **Itemized Breakdown**: Clear quantity × unit price = amount
+-  **Professional HTML Invoices**: Print-to-PDF compatible invoices
+-  **Auto GST Calculation**: 18% GST automatically calculated
+-  **Invoice Status**: Issued, Pending, Paid tracking
+-  **Itemized Breakdown**: Clear quantity × unit price = amount
 
 ###  Customer Management
-- ✅ **Customer Profiles**: Store phone, name, order history
-- ✅ **Phone Number Matching**: Auto-link messages to customers
-- ✅ **Customer Stats**: Total spent, order count, payment status
+-  **Customer Profiles**: Store phone, name, order history
+-  **Phone Number Matching**: Auto-link messages to customers
+-  **Customer Stats**: Total spent, order count, payment status
 
 ###  Product & Pricing
-- ✅ **Dynamic Pricing**: Update prices via admin messages
-- ✅ **Product Database**: Store kurti, dupatta, saree prices
-- ✅ **Fuzzy Price Matching**: Even if customer says "blue kurti", system matches to stored "kurti"
+-  **Dynamic Pricing**: Update prices via admin messages
+-  **Product Database**: Store kurti, dupatta, saree prices
+-  **Fuzzy Price Matching**: Even if customer says "blue kurti", system matches to stored "kurti"
 
 ###  Dashboard
-- ✅ **Real-time Stats**: Total revenue, pending orders, recent messages
-- ✅ **Revenue Tracking**: See how much you've earned today/this week
-- ✅ **Live Message Feed**: See orders coming in real-time via SSE
+-  **Real-time Stats**: Total revenue, pending orders, recent messages
+-  **Revenue Tracking**: See how much you've earned today/this week
+-  **Live Message Feed**: See orders coming in real-time via SSE
 
 ---
 
@@ -407,10 +407,10 @@ Live URL: `https://your-app.vercel.app`
 
 ##  Security Notes
 
-- ✅ All prices stored in **paisa** (not rupees) to avoid decimal issues
-- ✅ Database queries use **Drizzle ORM** (SQL injection safe)
-- ✅ Message parsing uses **Zod validation** (type-safe)
-- ✅ Twilio webhook validates **signature** (request integrity)
+-  All prices stored in **paisa** (not rupees) to avoid decimal issues
+-  Database queries use **Drizzle ORM** (SQL injection safe)
+-  Message parsing uses **Zod validation** (type-safe)
+-  Twilio webhook validates **signature** (request integrity)
 -  For production: Add authentication (Passport.js ready)
 
 ---
@@ -466,16 +466,17 @@ Questions? Issues?
 ##  Changelog
 
 ### v1.0.0 (Current)
-- ✅ WhatsApp message parsing with AI
-- ✅ Order auto-creation
-- ✅ Professional HTML invoice generation
-- ✅ Cascade delete for data integrity
-- ✅ Real-time dashboard with stats
-- ✅ Customer & product management
-- ✅ Vercel deployment ready
+-  WhatsApp message parsing with AI
+-  Order auto-creation
+-  Professional HTML invoice generation
+-  Cascade delete for data integrity
+-  Real-time dashboard with stats
+-  Customer & product management
+-  Vercel deployment ready
 
 ---
 
 **Made with ❤️ for Indian businesses 🇮🇳**
+
 
 
