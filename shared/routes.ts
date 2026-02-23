@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { customers, messages, orders, invoices } from './schema';
+const BASE_URL =
+  typeof window !== "undefined"
+    ? import.meta.env?.VITE_API_URL || ""
+    : "";
 
 export const errorSchemas = {
   validation: z.object({ message: z.string(), field: z.string().optional() }),
@@ -120,14 +124,17 @@ export const api = {
   },
 };
 
-export function buildUrl(path: string, params?: Record<string, string | number>): string {
+export function buildUrl(
+  path: string,
+  params?: Record<string, string | number>
+): string {
   let url = path;
+
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
-      if (url.includes(`:${key}`)) {
-        url = url.replace(`:${key}`, String(value));
-      }
+      url = url.replace(`:${key}`, String(value));
     });
   }
-  return url;
+
+  return `${BASE_URL}${url}`;
 }

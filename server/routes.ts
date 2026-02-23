@@ -364,7 +364,19 @@ export async function registerRoutes(
 
   app.post(api.ingestChat.create.path, async (req, res) => {
     try {
-      const input = api.ingestChat.create.input.parse(req.body);
+      const isTwilioPayload = typeof req.body?.From === 'string' || typeof req.body?.Body === 'string';
+
+      const normalizedInput = isTwilioPayload
+        ? {
+            channel: 'whatsapp' as const,
+            businessAccount: 'twilio-webhook',
+            senderRole: 'customer' as const,
+            from: (req.body?.From || '').replace('whatsapp:', ''),
+            message: req.body?.Body || '',
+          }
+        : req.body;
+
+      const input = api.ingestChat.create.input.parse(normalizedInput);
       const result = await processIncomingMessage(input);
       res.status(200).json(result);
     } catch (err) {

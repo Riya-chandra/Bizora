@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@shared/routes";
+import { api, buildUrl } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
 
@@ -7,7 +7,7 @@ export function useMessages() {
   return useQuery({
     queryKey: [api.messages.list.path],
     queryFn: async () => {
-      const res = await fetch(api.messages.list.path);
+      const res = await fetch(buildUrl(api.messages.list.path));
       if (!res.ok) throw new Error("Failed to fetch messages");
       return api.messages.list.responses[200].parse(await res.json());
     },
@@ -70,7 +70,7 @@ export function useLiveMessageEvents() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const eventSource = new EventSource('/api/messages/stream');
+    const eventSource = new EventSource(buildUrl('/api/messages/stream'));
 
     const refreshAll = () => {
       queryClient.invalidateQueries({ queryKey: [api.messages.list.path] });
