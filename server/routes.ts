@@ -52,20 +52,47 @@ function buildDynamicPriceMap(
   return dynamicPriceMap;
 }
 
+function isLikelyPriceUpdateIntent(message: string): boolean {
+  const normalized = message.toLowerCase();
+  const hasUpdateVerb = /\b(update|set|change|modify|edit|revise)\b/.test(normalized);
+  const hasPricingWord = /\b(price|rate|mrp|cost)\b/.test(normalized);
+  const hasTargetValue = /(?:\bto\b|=|@)\s*₹?\s*\d{2,7}\b/.test(normalized) || /\b\d{2,7}\s*(?:rs|inr)\b/.test(normalized);
+  return (hasUpdateVerb && hasTargetValue) || (hasPricingWord && hasTargetValue);
+}
+
 function extractPriceUpdates(message: string): Array<{ productName: string; unitPrice: number }> {
   const updatesByProduct = new Map<string, number>();
-  const segments = message.split(/\s+and\s+/i);
+  const segments = message
+    .split(/\s+(?:and|aur)\s+|,|\n|;/i)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const patterns = [
+    /(?:update|set|change|modify|edit)\s+(?:the\s+)?(?:price|rate|mrp|cost)?\s*(?:of\s+)?([a-zA-Z][a-zA-Z\s-]{1,40}?)\s*(?:price|rate|mrp|cost)?\s*(?:to|as|is|=|@)\s*₹?\s*(\d{2,7})\b/i,
+    /([a-zA-Z][a-zA-Z\s-]{1,40}?)\s*(?:price|rate|mrp|cost)\s*(?:to|as|is|=|@)\s*₹?\s*(\d{2,7})\b/i,
+    /([a-zA-Z][a-zA-Z\s-]{1,40}?)\s*(?:to|=|@)\s*₹?\s*(\d{2,7})\b/i,
+  ];
+
+  const cleanupPattern = /\b(update|set|change|modify|edit|the|price|rate|mrp|cost|of|for|please|plz)\b/gi;
 
   for (const segment of segments) {
-    const match = segment.match(/([a-zA-Z][a-zA-Z\s-]{1,40}?)\s+(?:price)?\s*(?:to|is|=)?\s*(\d{2,7})\b/i);
-    if (!match) continue;
+    let bestMatch: RegExpMatchArray | null = null;
+    for (const pattern of patterns) {
+      const match = segment.match(pattern);
+      if (match) {
+        bestMatch = match;
+        break;
+      }
+    }
+    if (!bestMatch) continue;
 
-    let productName = (match[1] || '').trim();
-    // Remove leading keywords (update, set, change)
-    productName = productName.replace(/^(update|set|change|modify|edit)\s+/i, '').trim();
-    // Remove trailing keywords
-    productName = productName.replace(/\s+(price|to|is|for)\s*$/i, '').trim();
-    const unitPriceInCents = Number.parseInt(match[2], 10) * 100;
+    let productName = (bestMatch[1] || '')
+      .replace(cleanupPattern, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    productName = productName.replace(/\b(to|is|as|at)\b$/i, '').trim();
+    const unitPriceInCents = Number.parseInt(bestMatch[2], 10) * 100;
 
     if (!productName || productName.length < 2 || unitPriceInCents <= 0) continue;
 
@@ -194,9 +221,12 @@ async function processIncomingMessage(input: {
   const existingOrders = await storage.getOrders();
   const savedPrices = await storage.getProductPrices(input.businessAccount);
   const dynamicPriceMap = buildDynamicPriceMap(existingOrders, savedPrices);
+  const likelyPriceUpdate = isLikelyPriceUpdateIntent(input.message);
+  let adminPriceUpdates = 0;
 
   if (input.senderRole === 'admin') {
     const priceUpdates = extractPriceUpdates(input.message);
+    adminPriceUpdates = priceUpdates.length;
     console.log(`[Admin] Extracted price updates: ${JSON.stringify(priceUpdates)}`);
     for (const update of priceUpdates) {
       await storage.upsertProductPrice({
@@ -210,7 +240,14 @@ async function processIncomingMessage(input: {
     }
   }
 
-  let parsed = parseChatOrderMessage(input.message, dynamicPriceMap);
+  let parsed = (input.senderRole === 'admin' && adminPriceUpdates > 0)
+    ? { items: [] as ParsedItem[], totalAmount: 0, confidenceScore: 0.99 }
+    : parseChatOrderMessage(input.message, dynamicPriceMap);
+
+  if (likelyPriceUpdate && input.senderRole === 'customer' && parsed.items.length > 0) {
+    parsed = { items: [], totalAmount: 0, confidenceScore: 0.35 };
+  }
+
   console.log(`[Parser] Regex result: ${JSON.stringify(parsed)}`);
 
   // If low confidence OR message contains Hinglish keywords, ask AI for help
@@ -312,7 +349,9 @@ async function processIncomingMessage(input: {
     success: true,
     orderCreated,
     confidenceScore: parsed.confidenceScore,
-    itemsDetected: parsed.items.length,
+    itemsDetected: input.senderRole === 'admin' && adminPriceUpdates > 0
+      ? adminPriceUpdates
+      : parsed.items.length,
   };
 }
 
@@ -459,6 +498,51 @@ export async function registerRoutes(
   app.get(api.messages.list.path, async (req, res) => {
     const messages = await storage.getMessages();
     res.json(messages);
+  });
+
+  app.get(api.productPrices.list.path, async (req, res) => {
+    const query = api.productPrices.list.query.parse({
+      businessAccount: typeof req.query.businessAccount === 'string' ? req.query.businessAccount : 'default',
+    });
+    const prices = await storage.getProductPrices(query.businessAccount);
+    res.json(prices);
+  });
+
+  app.post(api.productPrices.upsert.path, async (req, res) => {
+    try {
+      const input = api.productPrices.upsert.input.parse(req.body);
+      const row = await storage.upsertProductPrice({
+        businessAccount: input.businessAccount,
+        productName: input.productName,
+        normalizedName: normalizeProductName(input.productName),
+        unitPrice: input.unitPrice,
+      });
+      res.json(row);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path?.join('.') });
+      }
+      res.status(500).json({ message: 'Failed to save product price' });
+    }
+  });
+
+  app.delete(api.productPrices.delete.path, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const query = api.productPrices.delete.query.parse({
+        businessAccount: typeof req.query.businessAccount === 'string' ? req.query.businessAccount : 'default',
+      });
+      const deleted = await storage.deleteProductPrice(id, query.businessAccount);
+      if (!deleted) {
+        return res.status(404).json({ message: 'Product price not found' });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path?.join('.') });
+      }
+      res.status(500).json({ message: 'Failed to delete product price' });
+    }
   });
 
   app.delete(api.messages.delete.path, async (req, res) => {

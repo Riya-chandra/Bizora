@@ -3,6 +3,7 @@ import {
   LayoutDashboard, 
   ShoppingBag, 
   Users, 
+  Package,
   Receipt, 
   MessageSquare, 
   Menu,
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { label: "Overview", icon: LayoutDashboard, href: "/" },
   { label: "Orders", icon: ShoppingBag, href: "/orders" },
   { label: "Customers", icon: Users, href: "/customers" },
+  { label: "Products", icon: Package, href: "/products" },
   { label: "Invoices", icon: Receipt, href: "/invoices" },
   { label: "Messages", icon: MessageSquare, href: "/messages" },
 ];

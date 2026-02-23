@@ -10,6 +10,7 @@ import Orders from "@/pages/Orders";
 import Customers from "@/pages/Customers";
 import Invoices from "@/pages/Invoices";
 import Messages from "@/pages/Messages";
+import Products from "@/pages/Products";
 
 function Router() {
   return (
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/" component={Overview} />
       <Route path="/orders" component={Orders} />
       <Route path="/customers" component={Customers} />
+      <Route path="/products" component={Products} />
       <Route path="/invoices" component={Invoices} />
       <Route path="/messages" component={Messages} />
       <Route component={NotFound} />

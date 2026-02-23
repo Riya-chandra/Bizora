@@ -122,6 +122,54 @@ export const api = {
       },
     },
   },
+  productPrices: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/product-prices' as const,
+      query: z.object({ businessAccount: z.string().default('default') }),
+      responses: {
+        200: z.array(z.object({
+          id: z.number(),
+          businessAccount: z.string(),
+          productName: z.string(),
+          normalizedName: z.string(),
+          unitPrice: z.number(),
+          createdAt: z.string().nullable().optional(),
+          updatedAt: z.string().nullable().optional(),
+        })),
+      },
+    },
+    upsert: {
+      method: 'POST' as const,
+      path: '/api/product-prices' as const,
+      input: z.object({
+        businessAccount: z.string().min(1),
+        productName: z.string().min(2),
+        unitPrice: z.number().int().positive(),
+      }),
+      responses: {
+        200: z.object({
+          id: z.number(),
+          businessAccount: z.string(),
+          productName: z.string(),
+          normalizedName: z.string(),
+          unitPrice: z.number(),
+          createdAt: z.string().nullable().optional(),
+          updatedAt: z.string().nullable().optional(),
+        }),
+        400: errorSchemas.validation,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/product-prices/:id' as const,
+      query: z.object({ businessAccount: z.string().default('default') }),
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        404: errorSchemas.notFound,
+      },
+    },
+  },
 };
 
 export function buildUrl(

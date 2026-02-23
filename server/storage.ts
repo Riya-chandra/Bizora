@@ -7,7 +7,7 @@ import {
   type Invoice, type InsertInvoice,
   type ProductPrice, type InsertProductPrice
 } from "@shared/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getCustomers(): Promise<Customer[]>;
@@ -29,6 +29,7 @@ export interface IStorage {
 
   getProductPrices(businessAccount: string): Promise<ProductPrice[]>;
   upsertProductPrice(price: InsertProductPrice): Promise<ProductPrice>;
+  deleteProductPrice(id: number, businessAccount: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -144,6 +145,13 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return row;
+  }
+
+  async deleteProductPrice(id: number, businessAccount: string): Promise<boolean> {
+    const result = await db
+      .delete(productPrices)
+      .where(and(eq(productPrices.id, id), eq(productPrices.businessAccount, businessAccount)));
+    return (result.rowCount ?? 0) > 0;
   }
 }
 
