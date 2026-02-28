@@ -12,8 +12,13 @@ Customer sends WhatsApp message → AI parses order → Order created → Invoic
                               [Smart Parser]  [Database]      [Professional PDF]
 ```
 
+
+
 ---
 
+##  How It Works - Complete Flow
+
+https://github.com/user-attachments/assets/56171e73-e561-4118-ba6f-5833896a5ba9
 ##  Key Features
 
 ###  Order Management
@@ -42,13 +47,6 @@ Customer sends WhatsApp message → AI parses order → Order created → Invoic
 -  **Real-time Stats**: Total revenue, pending orders, recent messages
 -  **Revenue Tracking**: See how much you've earned today/this week
 -  **Live Message Feed**: See orders coming in real-time via SSE
-
----
-
-##  How It Works - Complete Flow
-
-
-https://github.com/user-attachments/assets/56171e73-e561-4118-ba6f-5833896a5ba9
 
 
 ### **1. Message Ingestion** 
@@ -481,6 +479,7 @@ Questions? Issues?
 ---
 
 **Made with ❤️ for Indian businesses 🇮🇳**
+
 
 
 
